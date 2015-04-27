@@ -234,7 +234,6 @@ void processCommand(String command){
 }
 
 void loop(){
-	
 	String command;
 	if(Serial.available()){
 	    while (Serial.available() > 0)
@@ -259,7 +258,6 @@ void scanAndSend(){
 	long scan[360];
 	scanEnvironment(scan);
 	printScan(scan);
-
 }
 
 
@@ -267,7 +265,7 @@ void scanAndSend(){
 
 void printScan(long scanArray[360]){
 	Serial.println("# Done with scan");
-	Serial.println("scan");
+	Serial.print("scan ");
 	for(int i = 0; i < 360; i++){
 		Serial.print(scanArray[i]);
 		if(i != 359){
@@ -301,7 +299,7 @@ void scanEnvironment(long result[360]){
 	delay(10);
 
 	// Do a full scan
-	for(angle = 0; angle < 180; angle++){
+	for(angle = 0; angle < 180 - 5; angle++){
 		servo.write(angle);
 		(result)[frontSensorAngle(angle)] = getFrontDistance();
 		(result)[rearSensorAngle(angle)] = getRearDistance();
@@ -379,15 +377,23 @@ long getRearDistance(){
 
 // Wait to return until a certain number of ticks have occured on a motor
 void waitForTickCount(int motor, int ticks){
+	// Set a timeout amount
+	int timeout = 2000; // 2 seconds will cause a timeout
+	int elapsedTime = 0;
 	int initialTickCount = getMagnetCount(motor);
 	while((getMagnetCount(motor) - initialTickCount < ticks)){
 		delay(10);
+		elapsedTime += 10;
+		if(elapsedTime > timeout){
+			Serial.println("# AGER is stuck while turning");
+			return; // force a return
+		}
 	}
 	return;
 }
 
 int ticksRequiredForAngle(double angle){
-	return round((angle - 2.10938) / 19.2919);
+	return round((angle - 2.10938) / 19.2919) + 1;
 }
 
 /**
@@ -441,7 +447,18 @@ void travelDistance(int desiredDistance, int direction){
 	int rightVoltage = 255;
 	int deltaResolution = 10;
 	int diff;
-	// Serial.print("# Going Forward. Centimeters = ");
+	int elapsedTime = 0; // in ms
+	int ticksInLastSecond = 0;
+	int oppositeDirection;
+	if(direction == DIR_FORWARD){
+		Serial.print("# Going forward ");
+		Serial.println(desiredDistance);
+		oppositeDirection = DIR_BACKWARDS;
+	} else {
+		Serial.print("# Going backward ");
+		Serial.println(desiredDistance);
+		oppositeDirection = DIR_FORWARD;
+	}
 	Serial.println(desiredDistance);
 	while(totalDistance < desiredDistance){
 		Serial.print(leftVoltage);
@@ -451,10 +468,15 @@ void travelDistance(int desiredDistance, int direction){
 		setMotorParameters(LEFT, direction, BRAKE_OFF, leftVoltage);
 		setMotorParameters(RIGHT, direction, BRAKE_OFF, rightVoltage);
 		delay(100);
+		if(elapsedTime % 1000 == 0){
+			ticksInLastSecond = 0;
+		} else {
+			ticksInLastSecond += totalLeftTicks - (getMagnetCount(LEFT) - initialLeftMagnetCount);
+		}
 		totalLeftTicks = getMagnetCount(LEFT) - initialLeftMagnetCount;
 		totalRightTicks = getMagnetCount(RIGHT) - initialRightMagnetCount;
 		diff = abs(totalLeftTicks - totalRightTicks);
-
+/*
 		if(totalLeftTicks > totalRightTicks){
 			if(leftVoltage >= 130){
 				leftVoltage -= deltaResolution * diff;
@@ -468,7 +490,15 @@ void travelDistance(int desiredDistance, int direction){
 				leftVoltage += deltaResolution * diff;
 			}
 		}
+*/
 		totalDistance = (double)(totalLeftTicks + totalRightTicks) / (double)2.0 * DISTANCE_PER_MAGNET_TICK;
+		elapsedTime += 100;
+		if(((elapsedTime + 100) % 1000 == 0) && (ticksInLastSecond == 0)){
+			Serial.println("# Ager is stuck while going forward");
+			// Attempt to get un-stick by going back a bit and turning right
+			travelDistance(20, oppositeDirection);
+			travelToAngle(90);
+		}
 	}
 	setMotorParameters(LEFT, direction, BRAKE_ON, 0);
 	setMotorParameters(RIGHT, direction, BRAKE_ON, 0);
